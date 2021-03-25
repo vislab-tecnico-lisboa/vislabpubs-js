@@ -16,6 +16,9 @@
  *      (if the list for a specific year exists, then the script will not call orcid
  *      and the page maintainter will be responsible for the papers of that year)
  *  - Added "loading" animation to inform the user that the script is fetching papers
+ *  - Attempts to fix mismatches between publication year and conference year (assumes conference year
+ * as the correct value)
+ *  - Adds PDF link if available
  * 
  ************************************************/
 
@@ -50,6 +53,8 @@ const orcidList = [
 const doi_to_not_include = [
     "10.1007/978-3-540-79142-3_12",		
 ];
+
+const PDF_PATH = "http://vislab.isr.ist.utl.pt/wp-content/uploads/paper_pdfs/"
 
 
 const DYNAMIC_PAPERS_DIV_ID = "myPublications";
@@ -126,9 +131,11 @@ class Paper{
        this.citationValue = null
        this.month = null
        this.orcid_putcodelist_pair = []
+       this.pdf_link = null
+       this.try_pdf_link = null
     }
 
-    updatePaperFromData(data){
+    updatePaperFromData(data, elementID, paper_list, year_list){
 
 
         var title = data["title"]["title"].value;
@@ -161,12 +168,6 @@ class Paper{
             this.month = month;
         }
 
-        var year = null;
-        if (data["publication-date"]["year"] != null)
-            year = data["publication-date"]["year"].value;
-        
-        if(year != null && year != "")
-            this.year = year
         
 
         var jornal_name = null
@@ -207,7 +208,6 @@ class Paper{
         if(jornal_name != null && jornal_name != "")
             this.journalName = jornal_name;
 
-
         //Add bibtex citation info
         var citation = data["citation"];
         if (citation != null && citation["citation-type"] == "BIBTEX")
@@ -216,10 +216,63 @@ class Paper{
             this.citationValue = citation["citation-value"];
         }
 
+
+        var year = null;
+        if (data["publication-date"]["year"] != null)
+            year = data["publication-date"]["year"].value;
+
+        //Sometimes the publication year does not match the conference year.
+        //When this happens, the conference year is the previous year check if 
+        //it is described in the conference name
+
+        if(jornal_name != null && year != null && this.journalName.search(year-1) != -1)
+        {
+            var old_year = year;
+            year = year-1;
+
+            //Correct the paper category in the PapersByYear dictionary
+            PapersByYear[year].push(this);
+            var i;
+            for(i = 0; i < PapersByYear[old_year].length; i++)
+            {
+                if(PapersByYear[old_year][i] == this)
+                {
+                  PapersByYear[old_year].splice(i, 1);
+                  var re = new RegExp(old_year, "g");
+                  this.citationValue = this.citationValue.replace(re, year.toString());
+                  break;
+                }
+            }
+        }
+        
+        if(year != null && year != "")
+            this.year = year
+
+
         //Add source information
         this.source = data["source"]["source-name"].value
 
+
+        //Check if the pdf file is available
+
+        var pdf_url = PDF_PATH+this.getPDFname();
+        this.try_pdf_link = pdf_url;
+
         count_updates++;
+
+        var request = new XMLHttpRequest();
+        var this_paper = this;
+        request.open('GET', pdf_url);
+        request.onreadystatechange = function(){
+            if (request.readyState === 4){
+                if (request.status === 200) {  
+                    this_paper.pdf_link = pdf_url;
+                }  
+            }
+            callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year_list);
+        };
+        request.send();
+        callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(1);
 
     }
 
@@ -233,10 +286,30 @@ class Paper{
         var html_code = ""
         var bibtex_download = "<a id='bib_" + this.DOI + "' title='Cite this paper' href='#' onclick='dl_as_file_Blob(\"" + this.DOI + "\");return false;'>[Cite]</a>";
 
+        var pdf_download;
+
+        if(this.pdf_link == null)
+        {
+            pdf_download = "<span title='Cannot find file: "+this.try_pdf_link+"'>[PDF]</span>"
+        }else{
+            pdf_download = "<a href='"+this.pdf_link+"'>[PDF]</a>";
+        }
+
         html_code += "<a href='https://doi.org/" + this.DOI + "'>";
         html_code += "<strong>" + this.title + "</a>,</strong> <em>" + this.authors + "</em>" + this.journalName + ", " + month_str + " " + this.year + " " + bibtex_download;
+        html_code += pdf_download;
 
         return html_code
+    }
+    getPDFname()
+    {
+       //Name structure - year_[first letter of first name][surname]_[first 4 letters of title]_[last 4 letters of title].pdf
+       var pdf_name = ""
+       var name_str_lst = this.authors.split(",")[0].split(". ");
+       var title_last = this.title.slice(-4);
+       var title_first = this.title.substr(0, 4);
+       pdf_name += pdf_name+this.year+"_"+name_str_lst[0]+name_str_lst[1]+"_"+title_first+"_"+title_last+".pdf";
+       return pdf_name
     }
 };
 
@@ -754,7 +827,7 @@ function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, element
                         }
                     }
 
-                    PapersByDOI[doi].updatePaperFromData(data);
+                    PapersByDOI[doi].updatePaperFromData(data, elementID, paper_list, year);
                     callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year)
 
                 });
