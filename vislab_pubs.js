@@ -344,8 +344,50 @@ function organizePapersByYearAndPlot()
 
     //Plot the number of papers
 
+    // convert struct in {"year": key, "count":value}
+    var counter_for_plot2 = Object.entries(counter_for_plot).map(([key, value]) => ({"year": key, "count": value}));
+    am4core.ready(function() {
 
-    //.... Plot code! ...
+        // Themes begin
+        am4core.useTheme(am4themes_animated);
+        // Themes end
+
+        // Create chart instance
+        var chart = am4core.create("chartdiv", am4charts.XYChart);
+
+        // Add data
+        chart.data = counter_for_plot2;
+        var categoryAxis = chart.xAxes.push(new am4charts.CategoryAxis());
+        categoryAxis.dataFields.category = "year";
+        categoryAxis.renderer.grid.template.location = 0;
+        categoryAxis.renderer.minGridDistance = 30;
+
+        categoryAxis.renderer.labels.template.adapter.add("dy", function(dy, target) {
+	    if (target.dataItem && target.dataItem.index & 2 == 2) {
+	        return dy + 25;
+	    }
+	    return dy;
+        });
+
+        var valueAxis = chart.yAxes.push(new am4charts.ValueAxis());
+
+        // Create series
+        var series = chart.series.push(new am4charts.ColumnSeries());
+        series.dataFields.valueY = "count";
+        series.dataFields.categoryX = "year";
+        series.name = "Number of Articles";
+        series.columns.template.tooltipText = "{categoryX}: [bold]{valueY}[/]";
+        series.columns.template.fillOpacity = .8;
+
+        var columnTemplate = series.columns.template;
+        columnTemplate.strokeWidth = 2;
+        columnTemplate.strokeOpacity = 1;
+        var title = chart.titles.create();
+        title.text = "Number of Articles per year";
+        title.fontSize = 25;
+        title.marginBottom = 30;
+
+    }); // end am4core.ready()
 
 
     updateHTML(selected_year);
