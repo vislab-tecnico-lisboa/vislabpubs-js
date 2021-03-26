@@ -231,6 +231,11 @@ class Paper{
             year = year-1;
 
             //Correct the paper category in the PapersByYear dictionary
+            if(!(year in PapersByYear))
+            {
+                PapersByYear[year] = [];
+            }
+
             PapersByYear[year].push(this);
             var i;
             for(i = 0; i < PapersByYear[old_year].length; i++)
@@ -260,20 +265,30 @@ class Paper{
 
         count_updates++;
 
+        
         var request = new XMLHttpRequest();
         var this_paper = this;
 
-        callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(1);
-        request.open('GET', pdf_url);
+        pdf_calls ++;
+        request.open('GET', pdf_url, true);
+        request.timeout = 10;
         request.onreadystatechange = function(){
             if (request.readyState === 4){
                 if (request.status === 200) {  
                     this_paper.pdf_link = pdf_url;
                 }  
             }
-            callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year_list);
+            pdf_calls--;
         };
-        request.send();
+        try{
+            request.send();
+        }
+        catch(error)
+        {
+            pdf_calls--;
+            console.log(error)
+        }
+        
 
     }
 
@@ -435,7 +450,20 @@ function writePapersByYear(elementID, paper_list, year)
     //If we do not have papers to process
     if(paper_list.length < 1)
     {
+
+        //Did not finish all pdf calls yet, retry
+        if(pdf_calls > 0)
+        {
+            setTimeout(function() {
+                writePapersByYear(elementID, paper_list, year);
+            }, 50);
+
+            console.log("PDF calls not ready yet, retrying")
+            return;
+        }
+
         console.log("Writting papers")
+
         writeHTMLlistOfPapersByYear(elementID, year)
 
     }else{
@@ -540,6 +568,7 @@ var CountPapersCompletedByYear = {};
 
 var callStackAuthorQuery = new CallStack(organizePapersByYearAndPlot);
 var callStackFetchPutcode = new CallStack(getExtraPapersData);
+var pdf_calls = 0;
 
 //Debug
 var count_requests = 0
@@ -827,7 +856,7 @@ function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, element
     {
         var ok = (PapersByDOI[doi_org].title != null && PapersByDOI[doi_org].authors != null
             && PapersByDOI[doi_org].journalName != null && PapersByDOI[doi_org].publicationYear != null
-            && PapersByDOI[doi_org].month != null && PapersByDOI[doi_org].source == "Scopus - Elsevier");
+            && PapersByDOI[doi_org].source == "Scopus - Elsevier");
 
         if(ok)
         {
@@ -930,3 +959,9 @@ function getExtraPapersData(elementID, paper_list, year)
 
 
 getAuthorPubs();
+
+
+//bibteste = "@InProceedings{coias2020assessment, author= {Ana Rita C\\'{o}ias and Alexandre Bernardino}, title= {Assessment of Motor Compensation Patterns in Stroke Rehabilitation Exercises}, booktitle= {Proceedings of the 26th Portuguese Conference on Pattern Recognition}, year= {2020}, pages= {61-62}, month= {October}, address= {\\'{E}vora, Portugal}, organization= {University of \\'{E}vora}}\n\n";
+//bibteste2 = "@article{Bernardino2021,title = {Break the Ice: a Survey on Socially Aware Engagement for Human?Robot First Encounters},journal = {International Journal of Social Robotics},year = {2021},author = {Avelino, J. and Garcia-Marques, L. and Ventura, R. and Bernardino, A.}}";
+//
+//json_bib = bibtexParse.toJSON(bibteste2)

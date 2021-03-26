@@ -2,7 +2,6 @@ Also refer to our <a href="http://welcome.isr.tecnico.ulisboa.pt/research/public
 
 <div id="Error_msgs"></div>
 
-<div id="loader">Loading...</div>
 
 <!-- Styles -->
 <style>
@@ -13,15 +12,52 @@ Also refer to our <a href="http://welcome.isr.tecnico.ulisboa.pt/research/public
 	}					
 </style>
 
+<style>
+.lds-dual-ring {
+  display: inline-block;
+  width: 80px;
+  height: 80px;
+}
+.lds-dual-ring:after {
+  content: " ";
+  display: block;
+  width: 64px;
+  height: 64px;
+  margin: 8px;
+  border-radius: 50%;
+  border: 6px solid #cef;
+  border-color: #cef transparent #cef transparent;
+  animation: lds-dual-ring 1.2s linear infinite;
+}
+@keyframes lds-dual-ring {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.center {
+position: absolute;
+top: 50%;
+left: 50%;
+}
+
+</style>
+
 <div id="chartdiv"></div>
 <!-- Resources -->
 <script src="https://cdn.amcharts.com/lib/4/core.js"></script>
 <script src="https://cdn.amcharts.com/lib/4/charts.js"></script>
 <script src="https://cdn.amcharts.com/lib/4/themes/animated.js"></script>
+<script src="3rd_party/bibtex_parse.js"></script>
 
 <div id="Years">
 </div>
 
+<!-- <div id="loader">Loading...</div> -->
+<div id="loader" class="lds-dual-ring center"></div>
 <div id="Pubs">
 	<ul style="list-style-type:none;">
 		<div id="myPublications">
