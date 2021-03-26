@@ -262,6 +262,8 @@ class Paper{
 
         var request = new XMLHttpRequest();
         var this_paper = this;
+
+        callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(1);
         request.open('GET', pdf_url);
         request.onreadystatechange = function(){
             if (request.readyState === 4){
@@ -272,7 +274,6 @@ class Paper{
             callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year_list);
         };
         request.send();
-        callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(1);
 
     }
 
@@ -309,7 +310,7 @@ class Paper{
        var title_last = this.title.slice(-4);
        var title_first = this.title.substr(0, 4);
        pdf_name += pdf_name+this.year+"_"+name_str_lst[0]+name_str_lst[1]+"_"+title_first+"_"+title_last+".pdf";
-       return pdf_name
+       return pdf_name.toLowerCase();
     }
 };
 
