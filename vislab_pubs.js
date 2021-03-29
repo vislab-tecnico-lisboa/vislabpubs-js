@@ -8,17 +8,22 @@
  *  - Writes the full reference with authors, journals / conferences, month (when available)
  *  - Parses the bibtex if the conference name is not available
  *  - Attempts to recover from orcid query failures
- *  - Aggregates information from multiple authors instead of just using first author it finds
+ *  - Aggregates information from multiple authors instead of just using the first author it finds
  *  - Plots the number of papers per year
  *  - Only writes the html when all queries are handled / completed
- *  - Uses cached values to avoid unecessary queries to orcid
+ *  - Uses cached values to avoid unecessary queries to orcid (only when changing between years.
+ *      A full page reload will perform queries again.)
  *  - For each year, papers can be loaded dynamically from orcid or hardcoded 
  *      (if the list for a specific year exists, then the script will not call orcid
  *      and the page maintainter will be responsible for the papers of that year)
  *  - Added "loading" animation to inform the user that the script is fetching papers
  *  - Attempts to fix mismatches between publication year and conference year (assumes conference year
  * as the correct value)
- *  - Adds PDF link if available
+ *  - Generates PDF link. Check the link in the webpage to know which name the script is expecting for
+ *    a specific paper.
+ *  - Attempts to solve issues with papers without a DOI (small conferences, workshop...)
+ *    * Can now process papers "imported from bibtex" to orcid if they belong to conferences / workshops
+ *      that are part of an "allow list". Right now only RECPAD papers are allowed.
  * 
  ************************************************/
 
@@ -54,6 +59,8 @@ const doi_to_not_include = [
     "10.1007/978-3-540-79142-3_12",		
 ];
 
+const ALLOWED_NO_DOI = ["Portuguese Conference on Pattern Recognition", "RECPAD"];
+
 const PDF_PATH = "http://vislab.isr.ist.utl.pt/wp-content/uploads/paper_pdfs/"
 
 
@@ -64,6 +71,8 @@ var dynamic_years = []
 var selected_year = new Date().getFullYear();
 var year = new Date();
 var counter_for_plot = {};
+var checked_duplicates = false;
+var organized = false;
 
 //Adapted from https://stackoverflow.com/questions/61597868/creating-and-downloading-text-file-from-string-in-javascript-blob-createobjectu
 function dl_as_file_Blob(DOI) {
@@ -152,7 +161,8 @@ class Paper{
         var authors = createAuthorsString(authors_raw);
 
         if(authors != null && authors != "")
-            this.authors = authors;
+            if((this.authors == null) || (this.authors.length < authors.length))
+                this.authors = authors;
 
         var month = null
         if (data["publication-date"]["month"] != null) {
@@ -230,22 +240,28 @@ class Paper{
             var old_year = year;
             year = year-1;
 
+            //Correct the citation year
+            var re = new RegExp(old_year, "g");
+            this.citationValue = this.citationValue.replace(re, year.toString());
+
             //Correct the paper category in the PapersByYear dictionary
-            if(!(year in PapersByYear))
+            if(!(year in PapersByYear) && this.DOI.search("NODOI:") == -1)
             {
                 PapersByYear[year] = [];
             }
 
-            PapersByYear[year].push(this);
-            var i;
-            for(i = 0; i < PapersByYear[old_year].length; i++)
+            if(this.DOI.search("NODOI:") == -1)
             {
-                if(PapersByYear[old_year][i] == this)
+                PapersByYear[year].push(this);
+
+                var i;
+                for(i = 0; i < PapersByYear[old_year].length; i++)
                 {
-                  PapersByYear[old_year].splice(i, 1);
-                  var re = new RegExp(old_year, "g");
-                  this.citationValue = this.citationValue.replace(re, year.toString());
-                  break;
+                    if(PapersByYear[old_year][i] == this)
+                    {
+                    PapersByYear[old_year].splice(i, 1);
+                    break;
+                    }
                 }
             }
         }
@@ -258,19 +274,54 @@ class Paper{
         this.source = data["source"]["source-name"].value
 
 
-        //Check if the pdf file is available
+        //Check if it is a fake doi. In that case, we must parse the bibtex...
+        if(this.DOI != null && this.DOI.search("NODOI:") != -1 && this.citationValue != null)
+        {
+            var bib_json = bibtexParse.toJSON(this.citationValue)[0];
+            
+            var allowed = false;
+            var bibJournalName = bib_json["entryTags"]["journal"]
+            for(var i = 0; i < ALLOWED_NO_DOI.length; i++)
+            {
+                if(ALLOWED_NO_DOI[i].search(bibJournalName) != -1)
+                {
+                    allowed = true;
+                    break;
+                }
+            }
 
+            if(allowed)
+            {
+                if(this.journalName == null || (bibJournalName != null && this.journalName.length < bibJournalName))
+                    this.journalName = bibJournalName;
+
+                var bib_authors = bib_json["entryTags"]["author"]
+                var authors_complete = createAuthorsString(bib_authors);
+                if(this.authors == null || (bib_authors != null && this.authors.length < bib_authors.length))
+                    this.authors = authors_complete;
+
+            }else{
+                if(this.DOI in Investigated)
+                    delete Investigated[this.DOI]
+            }
+        }
+
+
+
+        //Check if the pdf file is available
         var pdf_url = PDF_PATH+this.getPDFname();
         this.try_pdf_link = pdf_url;
 
         count_updates++;
 
-        
-        var request = new XMLHttpRequest();
+        this.pdf_link = pdf_url;
+
+        /* I cant make this work... */
+        /*var request = new XMLHttpRequest();
         var this_paper = this;
 
         pdf_calls ++;
-        request.open('GET', pdf_url, true);
+        request.open('HEAD', pdf_url, true);
         request.timeout = 10;
         request.onreadystatechange = function(){
             if (request.readyState === 4){
@@ -287,7 +338,7 @@ class Paper{
         {
             pdf_calls--;
             console.log(error)
-        }
+        }*/
         
 
     }
@@ -308,11 +359,18 @@ class Paper{
         {
             pdf_download = "<span title='Cannot find file: "+this.try_pdf_link+"'>[PDF]</span>"
         }else{
-            pdf_download = "<a href='"+this.pdf_link+"'>[PDF]</a>";
+            pdf_download = "<a href='"+this.pdf_link+"' target='_blank' rel='noopener noreferrer'>[PDF]</a>";
+        }
+        
+        if(this.DOI.search("NODOI:") != -1)
+        {
+            html_code += "<strong>" + this.title + ",</strong> <em>" + this.authors + "</em>" + this.journalName + ", " + month_str + " " + this.year + " " + bibtex_download;
+
+        }else{
+            html_code += "<a href='https://doi.org/" + this.DOI + "' target='_blank' rel='noopener noreferrer'>";
+            html_code += "<strong>" + this.title + "</a>,</strong> <em>" + this.authors + "</em>" + this.journalName + ", " + month_str + " " + this.year + " " + bibtex_download;
         }
 
-        html_code += "<a href='https://doi.org/" + this.DOI + "'>";
-        html_code += "<strong>" + this.title + "</a>,</strong> <em>" + this.authors + "</em>" + this.journalName + ", " + month_str + " " + this.year + " " + bibtex_download;
         html_code += pdf_download;
 
         return html_code
@@ -321,20 +379,106 @@ class Paper{
     {
        //Name structure - year_[first letter of first name][surname]_[first 4 letters of title]_[last 4 letters of title].pdf
        var pdf_name = ""
-       var name_str_lst = this.authors.split(",")[0].split(". ");
-       var title_last = this.title.slice(-4);
-       var title_first = this.title.substr(0, 4);
+       var name_str_lst = []
+       if(this.authors != null)
+       {
+        name_str_lst = this.authors.split(",")[0].split(". ");
+        name_str_lst[0] = name_str_lst[0].replace(/[^\w\s]/gi, '');
+        if(name_str_lst.length > 1)
+        {
+            name_str_lst[1] = name_str_lst[1].replace(/[^\w\s]/gi, '');
+        }else{
+            name_str_lst[1] = "";
+        }
+
+       }else{
+        name_str_lst[0] = ""
+        name_str_lst[1] = ""
+       }
+       
+
+       var title_clean = this.title.trim()
+       title_clean = title_clean.replace(/[^\w]/gi, '')
+
+       var title_last = "";
+       var title_first = "";
+
+       if(this.title.length >= 5)
+       {
+        title_last = title_clean.slice(-4);
+        title_first = title_clean.substr(0, 4);
+       }
+
        pdf_name += pdf_name+this.year+"_"+name_str_lst[0]+name_str_lst[1]+"_"+title_first+"_"+title_last+".pdf";
        return pdf_name.toLowerCase();
     }
 };
 
+function investigatePapers()
+{
+
+    for(fake_doi in PapersForInvestigation)
+    {
+
+        var calls = PapersForInvestigation[fake_doi].orcid_putcodelist_pair.length;
+        callStackInvestigate.updateCallStackCounterAndExecuteIfReady(calls);
+
+        Investigated[fake_doi] = PapersForInvestigation[fake_doi];
+        delete PapersForInvestigation[fake_doi];
+
+        while(Investigated[fake_doi].orcid_putcodelist_pair.length > 0)
+        {
+            var pair = Investigated[fake_doi].orcid_putcodelist_pair.pop();
+            var orcidID = pair[0];
+            var putcode = pair[1];
+            var year = Investigated[fake_doi].year
+            fetchSinglePutcode(Investigated[fake_doi].DOI, orcidID, putcode, [], year, null, callStackInvestigate, Investigated)
+        }
+
+
+    }
+}
+
+
 function organizePapersByYearAndPlot()
 {
 
+    if(!checked_duplicates)
+    {
+        //Check if papers in the full list of papers appear in the PapersForInvestigation
+        //dictionary. If so, we don't need further investigation for them...
+
+        for(key in PapersByDOI)
+        {
+            var fake_doi = PapersByDOI[key].publicationYear+PapersByDOI[key].title.toLowerCase();
+            fake_doi = "NODOI:"+fake_doi.replace(/[^\w]/gi, '');
+            if(fake_doi in PapersForInvestigation)
+            {
+                delete PapersForInvestigation[fake_doi]
+            }
+        }
+
+        checked_duplicates = true;
+    }
+
+    //Investigate papers without doi...
+    if(Object.keys(PapersForInvestigation).length > 0)
+    {
+        investigatePapers();
+        return;
+    }
+    
+
+    //Add investigated papers to PapersByDOI
+    for(fake_doi in Investigated)
+    {
+        PapersByDOI[fake_doi] = Investigated[fake_doi];
+    }
+
+
     //Organize papers by year
 
-    if(Object.keys(PapersByYear).length < 1)
+    if(!organized)
     {
         console.log("Organizing...");
 
@@ -349,6 +493,7 @@ function organizePapersByYearAndPlot()
             PapersByYear[year].push(PapersByDOI[d]);
         }
         console.log("Done")
+        organized = true;
 
     }
 
@@ -565,9 +710,12 @@ class CallStack{
 var PapersByDOI = {};
 var PapersByYear = {};
 var CountPapersCompletedByYear = {};
+var PapersForInvestigation = {};
+var Investigated = {};
 
 var callStackAuthorQuery = new CallStack(organizePapersByYearAndPlot);
 var callStackFetchPutcode = new CallStack(getExtraPapersData);
+var callStackInvestigate = new CallStack(organizePapersByYearAndPlot);
 var pdf_calls = 0;
 
 //Debug
@@ -694,14 +842,35 @@ function fillPapersFromAuthorQuery(data)
                 }
             }
 
+            if(!DOI.length)
+            {
+                //putcode = data.group[i]["work-summary"][0]["put-code"];
+                putcode = data.group[i]["work-summary"][data.group[i]["work-summary"].length - 1]["put-code"];
+
+                orcidID = data.group[i]["work-summary"]["0"]["path"].split('/')[1]
+                publicationType = data.group[i]["work-summary"][data.group[i]["work-summary"].length - 1]["type"]
+
+                if (data.group[i]["work-summary"][data.group[i]["work-summary"].length - 1].title.title != null)
+                    publicationName = data.group[i]["work-summary"][data.group[i]["work-summary"].length - 1].title.title.value;
+                else
+                    publicationName = "";
+
+                if (data.group[i]["work-summary"][data.group[i]["work-summary"].length - 1]["publication-date"] != null)
+                    publicationYear = data.group[i]["work-summary"][data.group[i]["work-summary"].length - 1]["publication-date"].year.value;
+                else
+                    publicationYear = "";                
+            }
+
+            
+
             if ((publicationType == "JOURNAL_ARTICLE" || publicationType == "CONFERENCE_PAPER"
                 || publicationType == "CONFERENCE_POSTER" || publicationType == "BOOK_CHAPTER" ||
                 publicationType == "BOOK" || publicationType == "CONFERENCE_ABSTRACT" ||
                 publicationType == "EDITED_BOOK" || publicationType == "JOURNAL_ISSUE" ||
-                publicationType == "REPORT") && (publicationYear != "" && publicationName != "" &&
-                DOI.length  && !in_doi_to_not_include(DOI) && in_member_contract(orcidID, publicationYear)
-                && year_in_dynamic_list(publicationYear))) {
-
+                publicationType == "REPORT") && (publicationYear != "" && publicationName != "" 
+                && in_member_contract(orcidID, publicationYear) && year_in_dynamic_list(publicationYear))) {
+                    if(DOI.length  && !in_doi_to_not_include(DOI))
+                    {
                         //If the paper is still not in the database, create it a add it
                         if (!(DOI in PapersByDOI))
                         {
@@ -719,11 +888,52 @@ function fillPapersFromAuthorQuery(data)
                             orcid_putcodelist_pair = [orcidID, putcode];
                             PapersByDOI[DOI].orcid_putcodelist_pair.push(orcid_putcodelist_pair)
                         }
-                        
+                    }else if(!DOI.length)
+                    {
+                    /*No DOI, means that we need a fake doi for this paper and investigate if a bibtex is available...*/
+                    /*and only use its conference is allowed*/
+                    var fake_doi = publicationYear+publicationName.toLowerCase();
+                    fake_doi = "NODOI:"+fake_doi.replace(/[^\w]/gi, '');
+
+                    if (!(fake_doi in PapersForInvestigation))
+                    {
+                        PapersForInvestigation[fake_doi] = new Paper(publicationName, publicationYear, publicationType, fake_doi);
+                    }
+
+                    var id_ptc_par = [orcidID, putcode];
+                    PapersForInvestigation[fake_doi].orcid_putcodelist_pair.push(id_ptc_par)
+
+                    }
             }
 
+        //More papers for investigation...
+        }else{
+            var title = data.group[i]["work-summary"][0].title.title.value
+            var year = data.group[i]["work-summary"][0]["publication-date"].year.value
+            var pubType = data.group[i]["work-summary"][0]["type"]
+            var ptcode = data.group[i]["work-summary"][0]["put-code"];
+            var orcID = data.group[i]["work-summary"][0]["path"].split('/')[1]
+
+            if(!year_in_dynamic_list(year))
+            {
+                return;
+            }
+
+            if(orcID.length && title.length && year.length && pubType == "CONFERENCE_PAPER" && ptcode != null)
+            {
+                var fake_doi = year+title.toLowerCase();
+                fake_doi = "NODOI:"+fake_doi.replace(/[^\w]/gi, '');
+
+                if (!(fake_doi in PapersForInvestigation))
+                {
+                    PapersForInvestigation[fake_doi] = new Paper(title, year, pubType, fake_doi);
+                }
+                var id_ptc_par = [orcID, ptcode];
+                PapersForInvestigation[fake_doi].orcid_putcodelist_pair.push(id_ptc_par)
+            }
 
         }
+
     }
 
 
@@ -847,20 +1057,20 @@ function drawYearsTab(selectedYear)
 /* If we get data too fast the fetch will start to fail (probably orcid rejecting the query) */
 /* Retry it and slow it down!*/
 
-function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, elementID)
+function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, elementID, callstack, papers_dict)
 {
 
     var ORCIDLink = "https://pub.orcid.org/v2.0/" + orcidID + "/work/" + putcode;
 
     if(doi_org != "")
     {
-        var ok = (PapersByDOI[doi_org].title != null && PapersByDOI[doi_org].authors != null
-            && PapersByDOI[doi_org].journalName != null && PapersByDOI[doi_org].publicationYear != null
-            && PapersByDOI[doi_org].source == "Scopus - Elsevier");
+        var ok = (papers_dict[doi_org].title != null && papers_dict[doi_org].authors != null
+            && papers_dict[doi_org].journalName != null && papers_dict[doi_org].publicationYear != null
+            && papers_dict[doi_org].source == "Scopus - Elsevier");
 
         if(ok)
         {
-            callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year);
+            callstack.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year);
             return;
         }
             
@@ -879,28 +1089,42 @@ function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, element
                         response.status);
                     //document.getElementById("Error_msgs").innerHTML = "Problem loading references: " + response.status +"<br> Please reload the page!";
                     setTimeout(function() {
-                        fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, elementID);
+                        fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, elementID, papers_dict);
                     }, PUTCODE_FETCH_TIME);
                 }
                 response.json().then(function (data) {
                     if(data["response-code"] == 404)
                     {
                         document.getElementById("Error_msgs").innerHTML = "Failed to get some data from ORCID. Please reload the page."
-                        callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year);
+                        callstack.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year);
                         return;
                     }
                     var doi = "";
-                    for(var i = 0; i < data["external-ids"]["external-id"].length; i++)
+                    if(data["external-ids"]["external-id"] != null)
                     {
-                        if(data["external-ids"]["external-id"][i]["external-id-type"].toUpperCase() == "DOI")
+                        for(var i = 0; i < data["external-ids"]["external-id"].length; i++)
                         {
-                            doi = data["external-ids"]["external-id"][i]["external-id-value"].toUpperCase() 
-                            break;
+                            if(data["external-ids"]["external-id"][i]["external-id-type"].toUpperCase() == "DOI")
+                            {
+                                doi = data["external-ids"]["external-id"][i]["external-id-value"].toUpperCase() 
+                                break;
+                            }
                         }
                     }
 
-                    PapersByDOI[doi].updatePaperFromData(data, elementID, paper_list, year);
-                    callStackFetchPutcode.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year)
+                    if(doi == "")
+                    {
+                        //Then, it is a fake doi
+                        pub_year = data["publication-date"]["year"].value;
+                        pub_title = data["title"]["title"].value;
+                        doi = pub_year+pub_title.toLowerCase();
+                        doi = "NODOI:"+doi.replace(/[^\w]/gi, '');
+                    }
+
+                    if(doi in papers_dict)
+                        papers_dict[doi].updatePaperFromData(data, elementID, paper_list, year);
+
+                    callstack.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year)
 
                 });
 
@@ -911,7 +1135,7 @@ function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, element
             
             //Try again but slow down!
             setTimeout(function() {
-                fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, elementID);
+                fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, elementID, papers_dict);
             }, 10*PUTCODE_FETCH_TIME)
         });
 
@@ -952,7 +1176,7 @@ function getExtraPapersData(elementID, paper_list, year)
         var pair = paper_list[0].orcid_putcodelist_pair.pop();
         var orcidID = pair[0];
         var putcode = pair[1];
-        fetchSinglePutcode(paper_list[0].DOI, orcidID, putcode, paper_list, year, elementID)
+        fetchSinglePutcode(paper_list[0].DOI, orcidID, putcode, paper_list, year, elementID, callStackFetchPutcode, PapersByDOI)
     }
     
 }
@@ -962,6 +1186,8 @@ getAuthorPubs();
 
 
 //bibteste = "@InProceedings{coias2020assessment, author= {Ana Rita C\\'{o}ias and Alexandre Bernardino}, title= {Assessment of Motor Compensation Patterns in Stroke Rehabilitation Exercises}, booktitle= {Proceedings of the 26th Portuguese Conference on Pattern Recognition}, year= {2020}, pages= {61-62}, month= {October}, address= {\\'{E}vora, Portugal}, organization= {University of \\'{E}vora}}\n\n";
-//bibteste2 = "@article{Bernardino2021,title = {Break the Ice: a Survey on Socially Aware Engagement for Human?Robot First Encounters},journal = {International Journal of Social Robotics},year = {2021},author = {Avelino, J. and Garcia-Marques, L. and Ventura, R. and Bernardino, A.}}";
+bibteste = "@article{Bernardino2021,title = {Break the Ice: a Survey on Socially Aware Engagement for Human?Robot First Encounters},journal = {International Journal of Social Robotics},year = {2021},author = {Avelino, J. and Garcia-Marques, L. and Ventura, R. and Bernardino, A.}}";
 //
-//json_bib = bibtexParse.toJSON(bibteste2)
+json_bib = bibtexParse.toJSON(bibteste)
+
+console.log("Testing...")

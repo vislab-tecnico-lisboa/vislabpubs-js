@@ -50,8 +50,12 @@
             "\'{I}" : "&Iacute;",
             "\'{O}" : "&Oacute;",
             "\'{U}" : "&Uacute;",
+            "\'{c}" : "&cacute;",
+            "\'{C}" : "&Cacute;",
             "\c{c}" : "&ccedil;",
+            "c{c}" : "&ccedil;",
             "\c{C}" : "&Ccedil;",
+            "c{C}" : "&Ccedil;",
             "\v{c}" : "&ccaron;",
             "\v{C}" : "&Ccaron;",
             "\v{S}" : "&Scaron;",
@@ -351,8 +355,59 @@
         b.setInput(bibtex);
         b.bibtex();
 
-        //Replace latex accents by html codes in author names
+        //Replace latex accents by html codes
+
+        for(key in b.accents_latex_html_dict)
+        {
+            b.entries[0]["entryTags"]["author"] = b.entries[0]["entryTags"]["author"].replace("\\"+key, b.accents_latex_html_dict[key])
+        }
+
+        //Split authors
+        authors_bibtex = b.entries[0]["entryTags"]["author"]
         
+        //Split by "and"
+        and_splits = authors_bibtex.split(" and ")
+
+        var authors_raw = [];
+
+        var comma_idx = and_splits[0].search(", ");
+        var dot_idx = and_splits[0].search(/\./);
+
+        if(dot_idx < comma_idx)
+        {
+            //Format 1: J. Avelino, P. Vicente, and A. Bernardino
+            for(var i = 0; i < and_splits.length; i++)
+            {
+                var comma_splits = and_splits[i].split(", ");
+                for(var j = 0; j < comma_splits.length; j++)
+                {
+                    var space_splits = comma_splits[j].split(" ");
+                    var auth_dct = {"credit-name" : {value : space_splits[1]+", "+space_splits[0]}}
+                    authors_raw.push(auth_dct)
+                }
+            }
+
+        }else if(dot_idx > comma_idx )
+        {
+            //Format 2: Avelino, J. and Vicente, P, and Bernardino, A.
+            for(var i = 0; i < and_splits.length; i++)
+            {
+                var auth_dct = {"credit-name" : {value : and_splits[i]}}
+                authors_raw.push(auth_dct)
+            }
+
+        }else{
+            //Format 3: Joao Avelino and Pedro Vicente and Alexandre Bernardino
+            for(var i = 0; i < and_splits.length; i++)
+            {
+                var space_splits = and_splits[i].split(" ");
+                var auth_dct = {"credit-name" : {value : space_splits[space_splits.length-1]+", "+space_splits[0]}}
+                authors_raw.push(auth_dct)
+            }
+        }
+
+        b.entries[0]["entryTags"]["author"] = authors_raw;
+
 
         return b.entries;
     };
