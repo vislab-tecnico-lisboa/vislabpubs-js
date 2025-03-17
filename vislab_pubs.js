@@ -1,5 +1,5 @@
 /************************************************
- *  vislab_pubs.js - v0.2, March 2021
+ *  vislab_pubs.js - v0.3, March 2025
  *  
  *  By Joao Avelino and Pedro Vicente, 2021
  *  Based on code from https://www.ipfn.tecnico.ulisboa.pt/engineering/publications.html
@@ -52,7 +52,12 @@ const orcidList = [
 "0000-0002-2852-7723", "Catarina Barata",[2000,9999],
 "0000-0003-3678-4823", "João Avelino",[2015,9999],
 "0000-0002-9678-9055", "Pedro Vicente", [2013,9999],
-"0000-0002-7332-3391", "Ricardo Ribeiro", [2005, 9999]
+"0000-0002-7332-3391", "Ricardo Ribeiro", [2005, 9999],
+"0000-0001-8356-2962", "Bruno Damas", [2005, 9999],
+"0000-0002-4220-2247", "Atabak Dehban", [2016, 9999],
+"0000-0002-8583-632X", "El Kahlil CHERIF", [2022,9999]
+
+
 ];
 
 const doi_to_not_include = [
@@ -144,7 +149,7 @@ class Paper{
        this.try_pdf_link = null
     }
 
-    updatePaperFromData(data, elementID, paper_list, year_list){
+    updatePaperFromData(data, elementID, paper_list, year_list, doi){
 
 
         var title = data["title"]["title"].value;
@@ -155,10 +160,19 @@ class Paper{
         
         if(title != null && title != "")
             this.title = title;
+        var authors = null
+        
+        if(data["contributors"] != null){
+            var authors_raw = data["contributors"]["contributor"];
+            authors = createAuthorsString(authors_raw);
+        }
+        else{
+            console.log("%s",doi)
+        }
+            
 
-
-        var authors_raw = data["contributors"]["contributor"];
-        var authors = createAuthorsString(authors_raw);
+            
+        
 
         if(authors != null && authors != "")
             if((this.authors == null) || (this.authors.length < authors.length))
@@ -481,15 +495,14 @@ function organizePapersByYearAndPlot()
     if(!organized)
     {
         console.log("Organizing...");
+		
+		for(var y in dynamic_years)
+			PapersByYear[dynamic_years[y]] = [];
+		
 
         for(var d in PapersByDOI)
         {
             var year = PapersByDOI[d].publicationYear;
-            if(!(year in PapersByYear))
-            {
-                PapersByYear[year] = [];
-            }
-
             PapersByYear[year].push(PapersByDOI[d]);
         }
         console.log("Done")
@@ -670,7 +683,9 @@ function writeHTMLlistOfPapersByYear(elementID, year)
                 year_l.innerHTML = html_code;
             }
 
-        }
+        }else{
+			continue
+		}
     }
 
     document.getElementById("loader").style.display = "none";
@@ -1122,7 +1137,7 @@ function fetchSinglePutcode(doi_org, orcidID, putcode, paper_list, year, element
                     }
 
                     if(doi in papers_dict)
-                        papers_dict[doi].updatePaperFromData(data, elementID, paper_list, year);
+                        papers_dict[doi].updatePaperFromData(data, elementID, paper_list, year, doi);
 
                     callstack.updateCallStackCounterAndExecuteIfReady(-1, elementID, paper_list, year)
 
@@ -1186,7 +1201,7 @@ getAuthorPubs();
 
 
 //bibteste = "@InProceedings{coias2020assessment, author= {Ana Rita C\\'{o}ias and Alexandre Bernardino}, title= {Assessment of Motor Compensation Patterns in Stroke Rehabilitation Exercises}, booktitle= {Proceedings of the 26th Portuguese Conference on Pattern Recognition}, year= {2020}, pages= {61-62}, month= {October}, address= {\\'{E}vora, Portugal}, organization= {University of \\'{E}vora}}\n\n";
-bibteste = "@article{Bernardino2021,title = {Break the Ice: a Survey on Socially Aware Engagement for Human?Robot First Encounters},journal = {International Journal of Social Robotics},year = {2021},author = {Avelino, J. and Garcia-Marques, L. and Ventura, R. and Bernardino, A.}}";
+bibteste = "@INPROCEEDINGS{Santos2022, author={Santos, Laura and Silva, Bárbara and Maddaloni, Filippo and Geminiani, Alice and Caglio, Arianna and Annunziata, Silvia and Olivieri, Ivana and Barata, Catarina and Santos-Victor, José and Pedrocchi, Alessandra}, booktitle={2022 International Conference on Rehabilitation Robotics (ICORR)}, title={Sharing Worlds: Design of a Real-Time Attention Classifier for Robotic Therapy of ASD Children}, year={2022}}";
 //
 json_bib = bibtexParse.toJSON(bibteste)
 
